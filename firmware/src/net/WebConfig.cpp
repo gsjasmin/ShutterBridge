@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
-#include <LittleFS.h>
+#include "WebUiAssets.h"  // generated from data/ by scripts/gzip_webui.py
 #include <NimBLEDevice.h>
 #include <WiFi.h>
 #include <esp_coexist.h>
@@ -60,6 +60,8 @@ const WebConfig::Route WebConfig::kRoutes[] = {
     {"/bridge", &WebConfig::handleBridge, false},
     {"/save", &WebConfig::handleSave, true},
     {"/reboot", &WebConfig::handleReboot, false},
+    {"/camuse", &WebConfig::handleCamUse, true},
+    {"/camdel", &WebConfig::handleCamDel, true},
 };
 
 ApiReply WebConfig::call(const char* path, const ApiArgs& args) {
@@ -73,22 +75,33 @@ void WebConfig::begin() {
     if (routesSet_)
         return;
 
-    if (!LittleFS.begin(/*formatOnFail=*/true)) {
-        Serial.println("[web] LittleFS mount failed");
-    } else if (!LittleFS.exists("/index.html.gz") && !LittleFS.exists("/index.html")) {
-        Serial.println("[web] WARNING: web assets missing - run `pio run -t uploadfs`");
-    }
-
     for (const Route& rt : kRoutes) {
         const Handler h = rt.handler;
         server_.on(rt.path, rt.postOnly ? HTTP_POST : HTTP_ANY,
                    [this, h](AsyncWebServerRequest* r) { defer(r, h); });
     }
 
-    server_.serveStatic("/", LittleFS, "/")
-        .setDefaultFile("index.html")
-        .setCacheControl("no-cache")
-        .setFilter(isOwnHost);
+    // Web UI: gzipped files compiled into the firmware (no filesystem image to flash)
+    for (size_t i = 0; i < kWebUiAssetCount; i++) {
+        const WebUiAsset* asset = &kWebUiAssets[i];
+        auto send               = [asset](AsyncWebServerRequest* r) {
+            char etag[12];
+            snprintf(etag, sizeof(etag), "\"%08lx\"", (unsigned long)asset->etag);
+            if (r->hasHeader("If-None-Match") && r->header("If-None-Match") == etag) {
+                r->send(304);
+                return;
+            }
+            AsyncWebServerResponse* res = r->beginResponse(200, asset->mime, asset->gz, asset->len);
+            res->addHeader("Content-Encoding", "gzip");
+            res->addHeader("Cache-Control", "no-cache");
+            res->addHeader("ETag", etag);
+            r->send(res);
+        };
+        server_.on(asset->path, HTTP_GET, send).setFilter(isOwnHost);
+        if (strcmp(asset->path, "/index.html") == 0)
+            server_.on("/", HTTP_GET, send).setFilter(isOwnHost);
+    }
+    Serial.printf("[web] %u embedded UI files\n", (unsigned)kWebUiAssetCount);
     // Captive portal: every name resolves here, so OS connectivity probes (and any other
     // foreign-host request) get redirected to the UI
     server_.onNotFound([](AsyncWebServerRequest* r) {
@@ -223,6 +236,21 @@ ApiReply WebConfig::handleConfig(const ApiArgs& a) {
     doc["tz"]    = s_.tzOffsetMin;
     doc["clk"]   = s_.clockSync;  // sync camera clock from FC GPS time
     doc["wake"]  = s_.autoWake;   // wake a powered-off camera on boot
+    doc["fct"]   = s_.fcType;     // FcType: 0 Betaflight, 1 KISS native, 2 KISS Ultra MSP
+    doc["asw"]   = s_.autoSwitch;  // switch to another saved camera that is on
+    JsonArray cams = doc["cams"].to<JsonArray>();
+    for (int i = 0; i < Settings::MAX_CAMS; i++) {
+        const SavedCam& c = s_.cams[i];
+        if (!c.mac[0])
+            continue;
+        JsonObject o = cams.add<JsonObject>();
+        o["i"]       = i;
+        o["type"]    = c.type;
+        o["mac"]     = c.mac;
+        o["name"]    = c.name;
+    }
+    doc["bwarn"] = s_.camBattWarnPct;
+    doc["lwarn"] = s_.recLeftWarnMin;
     doc["fw"]    = FW_VERSION;
     doc["board"] = boardId();  // variant running now (resolved at boot)
     if (boardHasVariants())
@@ -267,6 +295,21 @@ ApiReply WebConfig::handleStatus(const ApiArgs& a) {
     }
     doc["aux1"]  = rc_ ? rc_->aux(1) : 0;
     doc["armed"] = lastArmed_ ? 1 : 0;
+    if (fc_) {
+        char d[96];
+        fc_->diag(d, sizeof(d));
+        doc["fcd"] = d;  // FC link health, e.g. which MSP requests get answers
+    }
+    if (osd_) {
+        // OSD preview: what the 4 Custom Msg slots show; "b" = flashing warning
+        JsonArray osd = doc["osd"].to<JsonArray>();
+        for (uint8_t i = 0; i < 4; i++) {
+            JsonObject o = osd.add<JsonObject>();
+            o["t"]       = osd_->previewText(i);
+            if (osd_->previewBlinks(i))
+                o["b"] = 1;
+        }
+    }
 
     JsonArray ch = doc["ch"].to<JsonArray>();
     if (rc_)
@@ -282,6 +325,7 @@ ApiReply WebConfig::handleSave(const ApiArgs& a) {
     // Boot-only fields: snapshot to detect a change that warrants a reboot
     const uint8_t oldCamType = s_.camType;
     const uint8_t oldBoard   = s_.boardVariant;
+    const uint8_t oldFcType  = s_.fcType;
     const int8_t  oldRx      = s_.fcRxPin;
     const int8_t  oldTx      = s_.fcTxPin;
     char          oldMac[sizeof(s_.camMac)];
@@ -321,10 +365,19 @@ ApiReply WebConfig::handleSave(const ApiArgs& a) {
     s_.autoWake           = a.has("wake") ? 1 : 0;
     s_.camType            = (uint8_t)constrain(a.get("ctype").toInt(), 0, 3);
     setStr(s_.camMac, sizeof(s_.camMac), a.get("mac"));
+    if (s_.camMac[0])  // a newly bound camera joins the saved list
+        s_.rememberCam(s_.camType, s_.camMac, a.get("cname").c_str());
+    s_.autoSwitch = a.has("asw") ? 1 : 0;
     setStr(s_.apSsid, sizeof(s_.apSsid), a.get("ssid"));
     setStr(s_.apPass, sizeof(s_.apPass), a.get("pass"));
     s_.webuiDisarmedOnly = a.has("dis") ? 1 : 0;
     s_.bleTxPower        = (uint8_t)constrain(a.get("ble").toInt(), 0, 2);
+    if (a.has("bwarn"))
+        s_.camBattWarnPct = (uint8_t)constrain(a.get("bwarn").toInt(), 0, 90);
+    if (a.has("lwarn"))
+        s_.recLeftWarnMin = (uint8_t)constrain(a.get("lwarn").toInt(), 0, 60);
+    if (a.has("fct"))
+        s_.fcType = (uint8_t)constrain(a.get("fct").toInt(), 0, (int)FcType::_Count - 1);
     if (boardHasVariants() && a.has("bvar"))
         s_.boardVariant =
             (uint8_t)constrain(a.get("bvar").toInt(), 0, (int)BoardVariant::_Count - 1);
@@ -343,6 +396,7 @@ ApiReply WebConfig::handleSave(const ApiArgs& a) {
 
     // Reboot after the response flushes if a boot-only field changed (write already committed)
     const bool needReboot = s_.camType != oldCamType || s_.boardVariant != oldBoard ||
+                            s_.fcType != oldFcType ||
                             s_.fcRxPin != oldRx || s_.fcTxPin != oldTx ||
                             strncmp(s_.camMac, oldMac, sizeof(oldMac)) != 0 ||
                             strncmp(s_.apSsid, oldSsid, sizeof(oldSsid)) != 0 ||
@@ -493,6 +547,9 @@ ApiReply WebConfig::handleShutter(const ApiArgs& a) {
 }
 
 ApiReply WebConfig::handleBridge(const ApiArgs& a) {
+    // The bridge is a raw MSP pump for the Betaflight Configurator; the KISS GUI has no TCP mode
+    if (s_.fcType != (uint8_t)FcType::Betaflight)
+        return ApiReply::text(400, "bridge needs a Betaflight FC");
     bridgeReq_ = true;
     return ApiReply::text(200, "bridge");
 }
@@ -502,4 +559,38 @@ ApiReply WebConfig::handleReboot(const ApiArgs& a) {
     if (!rebootAtMs_)
         rebootAtMs_ = 1;
     return ApiReply::text(200, "rebooting");
+}
+
+ApiReply WebConfig::handleCamUse(const ApiArgs& a) {
+    if (!a.has("i") || !s_.useCam(a.get("i").toInt()))
+        return ApiReply::text(400, "no such camera");
+    s_.save();
+    rebootAtMs_ = millis() + 600;  // the camera backend is chosen at boot
+    if (!rebootAtMs_)
+        rebootAtMs_ = 1;
+    return ApiReply::text(200, "reboot");
+}
+
+ApiReply WebConfig::handleCamDel(const ApiArgs& a) {
+    const int i = a.has("i") ? a.get("i").toInt() : -1;
+    if (i < 0 || i >= Settings::MAX_CAMS || !s_.cams[i].mac[0])
+        return ApiReply::text(400, "no such camera");
+    const bool active = strcasecmp(s_.cams[i].mac, s_.camMac) == 0;
+    s_.forgetCam(i);
+    if (active) {
+        // Fall back to another saved camera, else unbind
+        int next = -1;
+        for (int k = 0; k < Settings::MAX_CAMS && next < 0; k++)
+            if (s_.cams[k].mac[0])
+                next = k;
+        if (next < 0 || !s_.useCam(next))
+            s_.camMac[0] = '\0';
+    }
+    s_.save();
+    if (!active)
+        return ApiReply::text(200, "ok");
+    rebootAtMs_ = millis() + 600;
+    if (!rebootAtMs_)
+        rebootAtMs_ = 1;
+    return ApiReply::text(200, "reboot");
 }

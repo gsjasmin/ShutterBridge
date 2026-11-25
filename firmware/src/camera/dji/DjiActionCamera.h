@@ -27,6 +27,12 @@ class DjiActionCamera : public Camera {
         return connected_;
     }
 
+    static constexpr uint32_t kSleepHoldMs = 25000;  // no reconnects right after it sleeps
+
+    bool isAwake(uint32_t /*nowMs*/) const override {
+        return awake();
+    }
+
    private:
     enum ProtoState { PROTO_NONE, PROTO_CONNECTING, PROTO_CONNECTED };
 
@@ -66,6 +72,7 @@ class DjiActionCamera : public Camera {
     BootWake                  wake_;
     uint32_t                  lastWakeAdvMs_ = 0;
     uint32_t                  lastAttemptMs_ = 0;
+    uint32_t                  sleepHoldUntilMs_ = 0;  // see kSleepHoldMs
     uint32_t                  connectedAtMs_ = 0;
     static constexpr uint32_t kBackoffMinMs  = 5000;
     static constexpr uint32_t kBackoffMaxMs  = 30000;

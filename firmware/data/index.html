@@ -55,6 +55,19 @@
         </div>
 
         <div class="card">
+          <h2>OSD preview</h2>
+          <div class="osd-prev" id="osdprev">
+            <div class="osd-armed" id="osdarmed">DISARMED</div>
+            <div class="osd-lines" id="osdlines"></div>
+          </div>
+          <p class="hint" id="osdwarn" hidden></p>
+          <p class="hint">
+            What Custom Msg 0-3 show in the goggles right now. Highlighted lines
+            flash there as warnings.
+          </p>
+        </div>
+
+        <div class="card">
           <h2>Connection</h2>
           <div class="bound-row">
             <div>
@@ -63,9 +76,24 @@
             </div>
             <span id="conn" class="pill">connecting</span>
           </div>
+          <div id="savedcams"></div>
           <button id="bind" type="button" class="wide primary">
             Bind new camera
           </button>
+          <div class="row">
+            <label>Auto switch camera</label>
+            <div class="ctl">
+              <label class="switch"
+                ><input type="checkbox" id="asw" /><span class="track"></span
+              ></label>
+            </div>
+          </div>
+          <p class="hint">
+            Up to 3 paired cameras are kept. With auto switch on, when the
+            active camera stays off while disarmed and another saved camera is
+            switched on, the bridge moves to it (a quick reboot). Use picks one
+            by hand.
+          </p>
           <div class="row">
             <label>Wake camera on boot</label>
             <div class="ctl">
@@ -75,8 +103,11 @@
             </div>
           </div>
           <p class="hint">
-            When the bridge powers up, turn the camera on if it's switched off.
-            The camera must have been connected to the bridge recently.
+            When the bridge powers up, turn the active (last used) camera on if
+            it's switched off. The camera must have been connected to the bridge
+            recently. With auto switch on, a saved camera that is already on is
+            used instead and nothing is woken. Reboots from a camera switch or a
+            save never wake a camera.
           </p>
         </div>
 
@@ -193,7 +224,33 @@
             Place Custom Msg 0 to 3 in the Betaflight OSD. Each shows the field
             below.
           </p>
+          <p class="hint" id="osdkiss" hidden>
+            KISS firmware has no custom OSD text, so these slots are not shown
+            on a KISS FC. Check the camera on the Camera tab or the status LED.
+          </p>
           <div id="osd"></div>
+        </div>
+        <div class="card">
+          <h2>Warnings</h2>
+          <div class="row">
+            <label>Camera battery</label>
+            <div class="ctl unit">
+              <input id="bwarn" type="number" inputmode="numeric" min="0" max="90" />
+              <span>%</span>
+            </div>
+          </div>
+          <div class="row">
+            <label>Recording time left</label>
+            <div class="ctl unit">
+              <input id="lwarn" type="number" inputmode="numeric" min="0" max="60" />
+              <span>min</span>
+            </div>
+          </div>
+          <p class="hint">
+            The matching OSD slot blinks below these values. 0 turns a warning
+            off. Rec status also blinks NO SD!, REC REJECTED, NOT REC (armed)
+            and DISCONNECTED.
+          </p>
         </div>
       </section>
 
@@ -286,6 +343,26 @@
             GPS fix on the FC.
           </p>
         </div>
+        <div class="card">
+          <h2>Flight controller</h2>
+          <div class="row">
+            <label>Firmware</label>
+            <div class="ctl">
+              <select id="fct">
+                <option value="0">Betaflight (MSP)</option>
+                <option value="2">KISS Ultra (MSP, B57+)</option>
+                <option value="1">KISS (KISS protocol, no OSD)</option>
+              </select>
+            </div>
+          </div>
+          <p class="hint" id="fcthint">
+            Betaflight and KISS Ultra B57+: enable MSP on the wired UART and
+            place Custom Text Messages 1-4 in the OSD. Older KISS: set the UART
+            to "KissProtocol/OSD" in the KISS GUI (no OSD text). Changing it
+            reboots the bridge.
+          </p>
+          <p class="hint">Link: <code id="fcdiag">-</code></p>
+        </div>
         <div class="card" id="uartcard" hidden>
           <h2>FC UART</h2>
           <div class="row">
@@ -301,7 +378,7 @@
             TX to the FC's RX. Changing them reboots the bridge.
           </p>
         </div>
-        <div class="card">
+        <div class="card" id="bfbridgecard">
           <h2>Betaflight bridge</h2>
           <p class="hint">
             The bridge mode suspends camera features and opens a TCP port to

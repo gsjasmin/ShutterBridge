@@ -17,10 +17,52 @@ void ChannelActions::loadFromModes(const ModeRange* modes, ShutterVideoMode svm,
     armPrimed_    = false;
 }
 
+static constexpr uint32_t REC_CONFIRM_MS = 4000;  // camera must report recording by then
+static constexpr uint32_t KEEP_RETRY_MS  = 5000;  // re-start interval while armed
+
+void ChannelActions::sendRec(Camera& cam, bool start) {
+    if (start) {
+        cam.startRecord();
+        startSentMs_ = millis();
+        if (!startSentMs_)
+            startSentMs_ = 1;
+    } else {
+        cam.stopRecord();
+        startSentMs_ = 0;
+        rejected_    = false;
+    }
+}
+
+void ChannelActions::trackRejected(const Camera& cam, uint32_t now) {
+    if (cam.status().isRecording()) {
+        startSentMs_ = 0;
+        rejected_    = false;
+    } else if (startSentMs_ && now - startSentMs_ >= REC_CONFIRM_MS) {
+        startSentMs_ = 0;
+        rejected_    = cam.isConnected();  // a dropped link is reported as such, not as this
+    }
+}
+
+// Record-on-arm: while armed, recording should be on. Covers a camera that connects or
+// reconnects mid-flight and a bridge that rebooted while armed. A clip started by hand
+// on the camera is simply left running until disarm
+void ChannelActions::keepRecording(Camera& cam, uint32_t now) {
+    const CameraStatus& st = cam.status();
+    if (!cam.isConnected() || !st.ready || st.mode != CamMode::Video || st.isRecording() ||
+        pendingRec_ != REC_NONE || startSentMs_)
+        return;
+    // After a rejection back off further, so a camera that keeps refusing is not hammered
+    if (now - lastKeepMs_ < (rejected_ ? 3 * KEEP_RETRY_MS : KEEP_RETRY_MS))
+        return;
+    lastKeepMs_ = now;
+    Serial.println("[rec] armed but not recording - starting");
+    sendRec(cam, true);
+}
+
 void ChannelActions::scheduleRec(Camera& cam, bool start) {
     const uint16_t delay = start ? startDelayMs_ : stopDelayMs_;
     if (delay == 0) {
-        start ? cam.startRecord() : cam.stopRecord();
+        sendRec(cam, start);
         return;
     }
     pendingRec_  = start ? REC_START : REC_STOP;
@@ -31,9 +73,10 @@ void ChannelActions::update(const RcState& rc, Camera& cam, bool armed) {
     const uint32_t now = millis();
 
     if (pendingRec_ != REC_NONE && (int32_t)(now - pendingAtMs_) >= 0) {
-        (pendingRec_ == REC_START) ? cam.startRecord() : cam.stopRecord();
+        sendRec(cam, pendingRec_ == REC_START);
         pendingRec_ = REC_NONE;
     }
+    trackRejected(cam, now);
 
     // Record-on-arm
     if (opMode_ == OpMode::RecordOnArm) {
@@ -42,8 +85,14 @@ void ChannelActions::update(const RcState& rc, Camera& cam, bool armed) {
             armPrimed_ = true;
         } else if (armed != prevArmed_) {
             prevArmed_ = armed;
+            if (armed) {
+                rejected_   = false;  // fresh attempt each flight
+                lastKeepMs_ = now;    // the edge itself starts it; retry only after that
+            }
             scheduleRec(cam, armed);
         }
+        if (armed)
+            keepRecording(cam, now);
         return;
     }
 

@@ -81,6 +81,13 @@ class Camera {
 
     virtual const CameraStatus& status() const      = 0;
     virtual bool                isConnected() const = 0;
+
+    // Really usable: linked, reporting status, and not asleep. A BLE link alone is not
+    // enough - a sleeping DJI Action 6 still accepts connections but sends nothing
+    virtual bool isAwake(uint32_t nowMs) const {
+        const CameraStatus& s = status();
+        return isConnected() && s.lastUpdateMs != 0 && nowMs - s.lastUpdateMs < 2500;
+    }
 };
 
 inline const char* toString(RecState s) {

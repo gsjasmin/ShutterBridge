@@ -69,7 +69,8 @@ namespace msp {
                 break;
             case S_DIR:
                 err_ = (c == '!');
-                if (c == '>' || c == '!') {
+                req_ = (c == '<');
+                if (c == '>' || c == '!' || c == '<') {
                     data_.clear();
                     if (v2_) {
                         ck_ = 0;
@@ -103,7 +104,7 @@ namespace msp {
                 break;
             case V1_CRC:
                 if (c == ck_) {
-                    Message m{false, err_, cmd_, data_.data(), data_.size()};
+                    Message m{false, err_, req_, cmd_, data_.data(), data_.size()};
                     handler(m);
                 }
                 st_ = S_DOLLAR;
@@ -147,7 +148,7 @@ namespace msp {
                 break;
             case V2_CRC:
                 if (c == ck_) {
-                    Message m{true, err_, cmd_, data_.data(), data_.size()};
+                    Message m{true, err_, req_, cmd_, data_.data(), data_.size()};
                     handler(m);
                 }
                 st_ = S_DOLLAR;

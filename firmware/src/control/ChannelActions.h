@@ -12,6 +12,12 @@ class ChannelActions {
                        uint16_t startDelayMs, uint16_t stopDelayMs, OpMode opMode);
     void update(const RcState& rc, Camera& cam, bool armed);
 
+    // A start command went out but the camera never reported recording (wrong mode, no SD
+    // card, ...). Cleared once it records, or on the next stop
+    bool recRejected() const {
+        return rejected_;
+    }
+
    private:
     ModeRange        modes_[FUNC_COUNT];
     bool             prevActive_[FUNC_COUNT] = {false};
@@ -24,6 +30,12 @@ class ChannelActions {
 
     enum PendingRec : uint8_t { REC_NONE, REC_START, REC_STOP };
     void       scheduleRec(Camera& cam, bool start);
+    void       sendRec(Camera& cam, bool start);
+    void       trackRejected(const Camera& cam, uint32_t now);
+    void       keepRecording(Camera& cam, uint32_t now);
+    uint32_t   startSentMs_  = 0;  // 0 = no start awaiting confirmation
+    uint32_t   lastKeepMs_   = 0;
+    bool       rejected_     = false;
     uint16_t   startDelayMs_ = 0;
     uint16_t   stopDelayMs_  = 0;
     PendingRec pendingRec_   = REC_NONE;

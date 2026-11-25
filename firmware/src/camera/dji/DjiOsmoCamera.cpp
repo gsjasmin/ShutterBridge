@@ -64,7 +64,7 @@ bool DjiOsmoCamera::begin() {
     NimBLEDevice::init("ShutterBridge");
     applyBleTxPower();
     cb_ = new ClientCB(this);
-    if (g_settings.autoWake)
+    if (g_settings.autoWake && g_bootWakeAllowed)
         wake_.start();
     return attempt();
 }

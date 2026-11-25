@@ -2,6 +2,11 @@
 
 #include <Arduino.h>
 
+// False after a software reset (camera switch, settings save, reboot button): only a real
+// power-up wakes the camera, so switching to a camera never turns on one the user left off.
+// Set by main before the camera task starts
+extern bool g_bootWakeAllowed;
+
 class BootWake {
    public:
     void start() {

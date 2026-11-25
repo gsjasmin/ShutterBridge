@@ -1,4 +1,4 @@
-// Wi-Fi SoftAP + config web UI (serves data/ from LittleFS + a JSON API)
+// Wi-Fi SoftAP + config web UI (serves data/, embedded in the firmware, + a JSON API)
 // Wi-Fi and BLE share the radio, so the AP can shut down while armed
 #pragma once
 
@@ -12,6 +12,7 @@
 #include "config/Settings.h"
 #include "fc/FlightController.h"
 #include "net/ApiTypes.h"
+#include "osd/OsdRenderer.h"
 
 class WebConfig {
    public:
@@ -29,6 +30,13 @@ class WebConfig {
     void attachStatus(const CameraStatus* cam, const RcState* rc) {
         camStatus_ = cam;
         rc_        = rc;
+    }
+
+    void attachFc(const FlightController* fc) {
+        fc_ = fc;
+    }
+    void attachOsd(const OsdRenderer* osd) {
+        osd_ = osd;
     }
 
     void attachCamera(Camera* cam) {
@@ -81,6 +89,8 @@ class WebConfig {
     ApiReply handleShutter(const ApiArgs& a);  // GET /shutter?a=start|stop|photo (all backends)
     ApiReply handleBridge(const ApiArgs& a);   // GET /bridge (enter Betaflight-bridge mode)
     ApiReply handleReboot(const ApiArgs& a);   // GET /reboot
+    ApiReply handleCamUse(const ApiArgs& a);   // POST /camuse?i=N (switch to a saved camera)
+    ApiReply handleCamDel(const ApiArgs& a);   // POST /camdel?i=N (forget a saved camera)
 
     Settings&           s_;
     AsyncWebServer      server_;
@@ -88,6 +98,8 @@ class WebConfig {
     Camera*             camera_       = nullptr;
     const CameraStatus* camStatus_    = nullptr;
     const RcState*      rc_           = nullptr;
+    const FlightController* fc_       = nullptr;
+    const OsdRenderer*      osd_      = nullptr;
     bool                apUp_         = false;
     bool                routesSet_    = false;
     bool                dirty_        = false;

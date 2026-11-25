@@ -232,7 +232,7 @@ bool GoProCamera::begin() {
     NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
     cb_      = new ClientCB(this);
     rxQuery_ = new Reassembler();
-    if (g_settings.autoWake)
+    if (g_settings.autoWake && g_bootWakeAllowed)
         wake_.start();
     return attempt();
 }

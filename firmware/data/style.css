@@ -663,3 +663,80 @@ button.primary:hover {
   margin: 12px 0;
   text-align: left;
 }
+
+/* OSD preview: looks like goggle OSD text, so it stays dark in both themes */
+.osd-prev {
+  position: relative;
+  background: #0b0f17;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  color: #f1f5f9;
+  min-height: 110px;
+}
+.osd-armed {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+.osd-armed.on {
+  color: #f87171;
+}
+.osd-line {
+  display: flex;
+  gap: 10px;
+  line-height: 1.7;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.osd-line .n {
+  color: #64748b;
+  min-width: 1ch;
+}
+.osd-line .off {
+  color: #475569;
+}
+.osd-line.warn .t {
+  color: #fbbf24;
+  animation: osdblink 1s steps(1) infinite;
+}
+@keyframes osdblink {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .osd-line.warn .t {
+    animation: none;
+  }
+}
+
+/* Saved cameras */
+.scan-item.saved {
+  cursor: default;
+}
+.saved-act {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.saved-act button {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.saved-act button.ghost {
+  background: transparent;
+  color: var(--muted);
+}
+#savedcams {
+  margin-bottom: 10px;
+}

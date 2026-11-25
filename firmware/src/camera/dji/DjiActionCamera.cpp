@@ -70,7 +70,7 @@ bool DjiActionCamera::begin() {
     NimBLEDevice::init("ShutterBridge");
     applyBleTxPower();
     cb_ = new ClientCB(this);
-    if (g_settings.autoWake)
+    if (g_settings.autoWake && g_bootWakeAllowed)
         wake_.start();
     return attempt();
 }
@@ -154,6 +154,12 @@ void DjiActionCamera::poll() {
         const bool noTelemetry = status_.lastUpdateMs == 0 && (now - connectedAtMs_) > 60000;
         if (stale || noTelemetry) {
             Serial.printf("[act] link dead (%s) - dropping\n", stale ? "stale" : "no telemetry");
+            // A sleeping Action 6 still accepts a link but stalls service discovery for ~30 s,
+            // which blocks this task (and a switch to another saved camera). Back off first
+            if (powerMode_ == POWER_MODE_SLEEP) {
+                sleepHoldUntilMs_ = now + kSleepHoldMs;
+                Serial.println("[act] camera asleep - holding reconnects");
+            }
             if (client_)
                 client_->disconnect();
             connected_ = false;
@@ -170,7 +176,8 @@ void DjiActionCamera::poll() {
     uint32_t       interval = (g_apHasClient && backoffMs_ < kApRetryMs) ? kApRetryMs : backoffMs_;
     if (wake_.active())
         interval = 500;
-    if (!connected_ && (now - lastAttemptMs_ > interval)) {
+    const bool sleepHold = !wake_.active() && (int32_t)(now - sleepHoldUntilMs_) < 0;
+    if (!connected_ && !sleepHold && (now - lastAttemptMs_ > interval)) {
         lastAttemptMs_ = now;
         if (attempt()) {
             backoffMs_ = kBackoffMinMs;

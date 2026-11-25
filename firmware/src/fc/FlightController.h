@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 struct RcState {
@@ -33,6 +34,7 @@ struct FcTime {
 class FlightController {
    public:
     virtual ~FlightController()                                          = default;
+    virtual void           setPins(int rxPin, int txPin)                 = 0;  // before begin()
     virtual void           begin()                                       = 0;
     virtual void           poll()                                        = 0;
     virtual const RcState& rc() const                                    = 0;
@@ -40,4 +42,6 @@ class FlightController {
     virtual bool           armed() const                                 = 0;
     virtual bool           armedKnown() const                            = 0;
     virtual void           setOsdMessage(uint8_t slot, const char* text) = 0;
+    // Short link-health summary for the log / Web UI (e.g. which MSP replies arrive)
+    virtual void           diag(char* out, size_t n) const               = 0;
 };

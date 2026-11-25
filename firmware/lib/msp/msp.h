@@ -30,6 +30,7 @@ namespace msp {
     struct Message {
         bool           v2      = false;
         bool           error   = false;  // '!' reply
+        bool           request = false;  // '<' frame: the other side is polling us
         uint16_t       cmd     = 0;
         const uint8_t* payload = nullptr;
         size_t         len     = 0;
@@ -68,6 +69,7 @@ namespace msp {
         State                st_   = S_DOLLAR;
         bool                 v2_   = false;
         bool                 err_  = false;
+        bool                 req_  = false;
         uint16_t             cmd_  = 0;
         uint16_t             size_ = 0;
         uint16_t             idx_  = 0;

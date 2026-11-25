@@ -7,6 +7,7 @@ const OSD_FIELDS = [
   "Time left",
   "Resolution",
   "FPS",
+  "Format",
 ];
 
 const CAM_TYPE_NAMES = ["DJI Osmo (Nano)", "DJI Action / 360", "GoPro"];
@@ -57,6 +58,7 @@ function startAuto(i) {
 let cfg = null;
 let chVals = [];
 let boundMac = "";
+let boundName = ""; // model/name of a camera bound in this session (saved-list label)
 let boundType = 0;
 
 // ---- Tabs ----
@@ -160,6 +162,11 @@ async function loadConfig() {
   $("ble").value = cfg.ble != null ? cfg.ble : 0;
   $("clk").checked = cfg.clk !== 0;
   $("wake").checked = !!cfg.wake;
+  $("asw").checked = cfg.asw !== 0;
+  $("fct").value = +cfg.fct || 0;
+  $("bwarn").value = cfg.bwarn != null ? cfg.bwarn : 20;
+  $("lwarn").value = cfg.lwarn != null ? cfg.lwarn : 5;
+  applyFcType();
   $("boardctl").hidden = cfg.bvar == null;
   if (cfg.bvar != null) {
     $("bvar").value = cfg.bvar;
@@ -179,6 +186,39 @@ async function loadConfig() {
   setDirty(false);
   hideLoadingIfReady();
 }
+
+// Camera tab: mirror of the 4 OSD Custom Msg slots
+function renderOsdPreview(s) {
+  const slots = (cfg && cfg.osd) || [];
+  const osd = s.osd || [];
+  const esc = (t) =>
+    String(t).replace(/[&<>"]/g, (c) => "&#" + c.charCodeAt(0) + ";");
+  $("osdlines").innerHTML = [0, 1, 2, 3]
+    .map((i) => {
+      const o = osd[i] || {};
+      const field = slots[i] || 0;
+      const text = o.t
+        ? `<span class="t">${esc(o.t)}</span>`
+        : `<span class="off">${field ? "(blank)" : "off"}</span>`;
+      return `<div class="osd-line${o.b ? " warn" : ""}"><span class="n">${i}</span>${text}</div>`;
+    })
+    .join("");
+  const armed = !!s.armed;
+  $("osdarmed").textContent = armed ? "ARMED" : "DISARMED";
+  $("osdarmed").classList.toggle("on", armed);
+  const warns = osd.filter((o) => o && o.b && o.t).map((o) => o.t);
+  $("osdwarn").hidden = !warns.length;
+  $("osdwarn").textContent = warns.length ? "Warning: " + warns.join(", ") : "";
+}
+
+// FcType: 0 Betaflight, 1 KISS native (no OSD text), 2 KISS Ultra MSP.
+// The Betaflight bridge only works with Betaflight
+function applyFcType() {
+  const t = $("fct").value;
+  $("bfbridgecard").hidden = t !== "0";
+  $("osdkiss").hidden = t !== "1";
+}
+$("fct").addEventListener("change", applyFcType);
 
 function renderUartPins() {
   $("uartcard").hidden = !cfg.pins;
@@ -206,7 +246,58 @@ function applyOpMode() {
     : "Camera actions are mapped to the AUX switches below";
 }
 
+const esc = (t) =>
+  String(t).replace(/[&<>"]/g, (c) => "&#" + c.charCodeAt(0) + ";");
+
+// Saved cameras: the active one is marked, the others can be switched to or forgotten
+function renderSavedCams() {
+  const cams = (cfg && cfg.cams) || [];
+  $("savedcams").innerHTML = cams.length
+    ? cams
+        .map((c) => {
+          const active = c.mac.toUpperCase() === boundMac.toUpperCase();
+          const label = c.name || CAM_TYPE_NAMES[c.type] || "Camera";
+          return `<div class="scan-item saved${active ? " sel" : ""}">
+       <div class="scan-info">
+         <div class="scan-model">${esc(label)}</div>
+         <div class="scan-name">${esc(CAM_TYPE_NAMES[c.type] || "")} · ${esc(c.mac)}</div>
+       </div>
+       <div class="saved-act">
+         ${active ? '<span class="pill">active</span>' : `<button type="button" data-use="${c.i}">Use</button>`}
+         <button type="button" class="ghost" data-del="${c.i}" aria-label="Forget ${esc(label)}">Remove</button>
+       </div>
+     </div>`;
+        })
+        .join("")
+    : "";
+  $("savedcams").hidden = !cams.length;
+}
+
+$("savedcams").addEventListener("click", async (e) => {
+  const use = e.target.closest("[data-use]");
+  const del = e.target.closest("[data-del]");
+  if (!use && !del) return;
+  const i = (use || del).dataset[use ? "use" : "del"];
+  const cam = ((cfg && cfg.cams) || []).find((c) => String(c.i) === i);
+  if (del && !confirm(`Forget ${cam ? cam.name || cam.mac : "this camera"}?`))
+    return;
+  try {
+    const r = await fetch((use ? "/camuse" : "/camdel") + "?i=" + i, {
+      method: "POST",
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const res = (await r.text()).trim();
+    if (res === "reboot") return rebootFlow(false);
+    cfg.cams = cfg.cams.filter((c) => String(c.i) !== i);
+    renderSavedCams();
+    toast("Removed");
+  } catch (err) {
+    toast(use ? "Switch failed" : "Remove failed", true);
+  }
+});
+
 function renderBound() {
+  renderSavedCams();
   $("boundModel").textContent = boundMac
     ? CAM_TYPE_NAMES[boundType] || "Camera"
     : "No camera";
@@ -269,7 +360,7 @@ async function wizScan() {
   $("wizList").innerHTML = list
     .map(
       (d) =>
-        `<div class="scan-item" data-mac="${d.mac}">
+        `<div class="scan-item" data-mac="${d.mac}" data-name="${esc(d.model || d.name || "")}">
        <div class="scan-info">
          <div class="scan-model">${d.model || "Camera"}</div>
          <div class="scan-name">${d.name || "(no name)"}</div>
@@ -281,12 +372,15 @@ async function wizScan() {
   document
     .querySelectorAll("#wizList .scan-item")
     .forEach((el) =>
-      el.addEventListener("click", () => wizBind(el.dataset.mac)),
+      el.addEventListener("click", () =>
+        wizBind(el.dataset.mac, el.dataset.name),
+      ),
     );
 }
 
-function wizBind(mac) {
+function wizBind(mac, name) {
   boundMac = mac;
+  boundName = name || "";
   boundType = wizType;
   renderBound();
   wizShow("wizDone");
@@ -334,6 +428,11 @@ function collectConfig() {
   b.set("ble", $("ble").value);
   if ($("clk").checked) b.set("clk", "1");
   if ($("wake").checked) b.set("wake", "1");
+  if ($("asw").checked) b.set("asw", "1");
+  if (boundName) b.set("cname", boundName);
+  b.set("fct", $("fct").value);
+  b.set("bwarn", $("bwarn").value || 0);
+  b.set("lwarn", $("lwarn").value || 0);
   if (cfg.bvar != null) b.set("bvar", $("bvar").value);
   if (cfg.pins) {
     b.set("rx", $("rxpin").value);
@@ -589,6 +688,8 @@ async function tick() {
     $("battbar").style.width = (s.online ? s.batt : 0) + "%";
     $("sd").textContent = s.online ? (s.sd / 1024).toFixed(1) + "G" : "--";
     $("left").textContent = s.online ? fmtLeft(s.left) : "--:--";
+    if (s.fcd) $("fcdiag").textContent = s.fcd;
+    renderOsdPreview(s);
 
     if (cfg)
       cfg.modes.forEach((_, i) => {

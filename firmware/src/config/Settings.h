@@ -15,14 +15,28 @@ enum class OsdField : uint8_t {
     TimeLeft,
     Resolution,
     Fps,
+    Format,  // resolution + frame rate in one slot, e.g. "4K60"
     _Count,
 };
 
 const char* osdFieldName(OsdField f);
 
+// Betaflight and KISS Ultra (firmware B57+) both talk MSP; KissNative is the older
+// KISS serial protocol (no OSD text)
+enum class FcType : uint8_t { Betaflight = 0, KissNative = 1, KissUltraMsp = 2, _Count };
+
+// A paired camera kept for later. The active one is mirrored in camType/camMac
+struct SavedCam {
+    uint8_t type     = 0;   // as Settings::camType
+    char    mac[18]  = "";  // "" = empty slot
+    char    name[24] = "";  // model / BLE name from the scan, for the Web UI
+};
+
 struct Settings {
     // Bump on any layout change; old layouts need a COMPAT entry or they reset to defaults
-    static constexpr uint16_t SCHEMA = 18;
+    static constexpr uint16_t SCHEMA = 20;
+    // Paired cameras remembered (NimBLE keeps 3 bonds by default, so 3 bonded cameras fit)
+    static constexpr int MAX_CAMS = 3;
 
     uint32_t magic   = 0x53425247;  // 'SBRG'
     uint16_t version = SCHEMA;
@@ -72,6 +86,26 @@ struct Settings {
     // FC UART GPIOs; -1 = the board's default pin
     int8_t fcRxPin = -1;
     int8_t fcTxPin = -1;
+
+    // Flight controller firmware (FcType): 0 = Betaflight, 1 = KISS native, 2 = KISS Ultra MSP
+    uint8_t fcType = 0;
+
+    // OSD warnings, 0 = off: blink when the camera battery / recording time left drops below
+    uint8_t camBattWarnPct = 20;
+    uint8_t recLeftWarnMin = 5;
+
+    // --- Saved cameras: switch between them without re-pairing ---
+    SavedCam cams[MAX_CAMS];
+    // When the active camera is off for a while and another saved camera is on, switch to it
+    uint8_t autoSwitch = 1;
+
+    // Add or update a saved camera (by MAC). When full, replaces the first entry that is
+    // not the active camera. Returns its index
+    int  rememberCam(uint8_t type, const char* mac, const char* name);
+    int  findCam(const char* mac) const;
+    void forgetCam(int i);
+    // Make saved camera i the active one (camType/camMac). Needs a reboot to take effect
+    bool useCam(int i);
 
     void setDefaults();
     void load();  // from NVS (falls back to defaults if missing/incompatible)

@@ -19,6 +19,8 @@ static const CompatVersion COMPAT[] = {
     {15, offsetof(Settings, autoWake)},
     {16, offsetof(Settings, boardVariant)},
     {17, offsetof(Settings, fcRxPin)},
+    {18, offsetof(Settings, fcType)},
+    {19, offsetof(Settings, cams)},
 };
 
 const char* osdFieldName(OsdField f) {
@@ -39,6 +41,8 @@ const char* osdFieldName(OsdField f) {
             return "Resolution";
         case OsdField::Fps:
             return "FPS";
+        case OsdField::Format:
+            return "Format";
         default:
             return "?";
     }
@@ -83,6 +87,11 @@ void Settings::load() {
     prefs.end();
     if (!ok)
         setDefaults();
+    // Settings from before saved cameras: keep the bound camera in the list
+    if (camMac[0] && findCam(camMac) < 0) {
+        rememberCam(camType, camMac, "");
+        migrated = true;
+    }
     if (!ok || migrated)
         save();
 }
@@ -91,4 +100,53 @@ void Settings::save() {
     prefs.begin("shutter", /*readOnly=*/false);
     prefs.putBytes("cfg", this, sizeof(*this));
     prefs.end();
+}
+
+static void copyStr(char* dst, size_t n, const char* src) {
+    strncpy(dst, src ? src : "", n - 1);
+    dst[n - 1] = '\0';
+}
+
+int Settings::findCam(const char* mac) const {
+    if (!mac || !mac[0])
+        return -1;
+    for (int i = 0; i < MAX_CAMS; i++)
+        if (cams[i].mac[0] && strcasecmp(cams[i].mac, mac) == 0)
+            return i;
+    return -1;
+}
+
+int Settings::rememberCam(uint8_t type, const char* mac, const char* name) {
+    if (!mac || !mac[0])
+        return -1;
+    int i = findCam(mac);
+    if (i < 0)
+        for (int k = 0; k < MAX_CAMS && i < 0; k++)
+            if (!cams[k].mac[0])
+                i = k;
+    if (i < 0)
+        for (int k = 0; k < MAX_CAMS && i < 0; k++)
+            if (strcasecmp(cams[k].mac, camMac) != 0)
+                i = k;
+    if (i < 0)
+        i = 0;
+    cams[i].type = type;
+    copyStr(cams[i].mac, sizeof(cams[i].mac), mac);
+    if (name && name[0])  // keep a known name when re-binding without one
+        copyStr(cams[i].name, sizeof(cams[i].name), name);
+    return i;
+}
+
+void Settings::forgetCam(int i) {
+    if (i < 0 || i >= MAX_CAMS)
+        return;
+    cams[i] = SavedCam();
+}
+
+bool Settings::useCam(int i) {
+    if (i < 0 || i >= MAX_CAMS || !cams[i].mac[0])
+        return false;
+    camType = cams[i].type;
+    copyStr(camMac, sizeof(camMac), cams[i].mac);
+    return true;
 }

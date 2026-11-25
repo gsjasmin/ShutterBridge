@@ -82,6 +82,7 @@ _❓ = supported by the backend but not yet verified on hardware._
 
 - **One of two boards** - **Waveshare ESP32-S3-Zero** (ESP32-S3FH4R2: 4 MB flash, 2 MB PSRAM, native USB) or **ESP32-C3 Super Mini** (ESP32-C3FH4: 4 MB flash, no PSRAM, USB-Serial/JTAG).
 - **Betaflight 2025.12 or newer** on your flight controller - talks to the bridge over MSP and draws the OSD elements.
+  - **Or a KISS Ultra (firmware B57+, MSP) or older KISS FC** (experimental) - see [KISS support](#kiss-support-experimental).
 - **A supported action camera** - a DJI Osmo / Action or a GoPro HERO9 or newer.
 
 ## Getting started
@@ -95,6 +96,27 @@ The easiest path is the browser-based flasher - no toolchain required:
 
 See the [full documentation](https://shutterbridge.yarosfpv.com/docs) for wiring, Betaflight OSD setup and per-camera notes.
 
+## KISS support (experimental)
+
+Two ways to connect a KISS flight controller. Pick one under **System > Flight controller** (the bridge reboots).
+
+**KISS Ultra (MSP, B57+)** - recommended. KISS Ultra firmware B57 and newer speaks MSP and has OSD *Custom Text Messages 1-4*, so the bridge works as it does with Betaflight, OSD included.
+
+1. Enable **MSP Protocol** on the UART wired to the bridge.
+2. Enable and place **Custom Text Messages 1-4** in the OSD editor. They show OSD slots 0-3.
+3. Check **System > Flight controller > Link** in the Web UI. It lists which MSP requests the FC answers (`ok`, `ERR` or `--`). If the FC does not answer `MSP_BOXIDS`, the bridge assumes ARM is flag bit 0 and shows `(bit0)`.
+
+**KISS (KISS protocol)** - for older KISS firmware without MSP. Set the UART to **KissProtocol/OSD** in the KISS GUI. Switches and record-on-arm work (AUX1-7, armed flag via `GET_TELEMETRY` 0x20), but there is **no OSD text**.
+
+Not available with either KISS mode: camera clock sync (no GPS time over the link) and the Betaflight bridge.
+
+## Recording and OSD behaviour
+
+- **Record on arm keeps recording while armed.** If the camera connects late, reconnects, or the bridge reboots mid-flight, recording is started again (every 5 s until the camera reports it). A clip started by hand on the camera keeps running until disarm.
+- **Rec status** shows `CAM READY` when disarmed and idle. It blinks `NOT REC` while armed without a clip, `REC REJECTED` when the camera did not start after a record command, `NO SD!` when the camera reports no free space and no time left, and `DISCONNECTED` when the camera drops during a flight. If no camera was connected at any point in the current flight, the slot stays blank.
+- **Warnings** (OSD tab): the camera battery and recording-time-left slots blink below the set thresholds (default 20 % and 5 min, 0 = off).
+- **Format** slot: resolution and frame rate in one slot, e.g. `4K60`.
+
 ## Building from source
 
 The firmware is a [PlatformIO](https://platformio.org) project targeting two boards:
@@ -105,12 +127,12 @@ Mini (env `esp32c3-supermini`). From the `firmware/` folder:
 # Build and flash the firmware over USB (defaults to esp32s3-zero)
 pio run -t upload
 
-# Build and upload the Web UI (LittleFS) image
-pio run -t uploadfs
-
-# For the ESP32-C3 Super Mini instead, add -e esp32c3-supermini to either command
+# For the ESP32-C3 Super Mini instead
 pio run -e esp32c3-supermini -t upload
 ```
+
+The Web UI in `firmware/data/` is gzipped and compiled into the firmware at build time
+(`scripts/gzip_webui.py`), so `upload` alone ships it. No separate `uploadfs` step.
 
 `pack-localhost-dev-firmware.sh [env]` bundles the build output into the site's local
 web flasher for development (defaults to `esp32s3-zero`).
